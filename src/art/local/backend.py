@@ -272,8 +272,12 @@ class LocalBackend(Backend):
         model: TrainableModel,
         config: dev.OpenAIServerConfig | None = None,
     ) -> tuple[str, str]:
+        logger = logging.getLogger(__name__)
         service = await self._get_service(model)
+        
+        # Just start the server normally for all services
         await service.start_openai_server(config=config)
+            
         server_args = (config or {}).get("server_args", {})
 
         base_url = f"http://{server_args.get('host', '0.0.0.0')}:{server_args.get('port', 8000)}/v1"

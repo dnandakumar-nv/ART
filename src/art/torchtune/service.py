@@ -59,23 +59,23 @@ class TorchtuneService:
         return self._is_sleeping
 
     async def train(
-        self,
-        disk_packed_tensors: DiskPackedTensors,
-        config: types.TrainConfig,
-        _config: dev.TrainConfig,
-        verbose: bool = False,
+            self,
+            disk_packed_tensors: DiskPackedTensors,
+            config: types.TrainConfig,
+            _config: dev.TrainConfig,
+            verbose: bool = False,
     ) -> AsyncIterator[dict[str, float]]:
         logger.info(f"Starting training with output_dir: {self.output_dir}")
         logger.info(f"Torchtune args: {self.torchtune_args}")
-        
+
         # Track if we've started yielding results
         yielded_any = False
-        
+
         try:
             # Yield an initial status to establish the async generator connection
             yield {"status": "initializing", "num_gradient_steps": 0}
             yielded_any = True
-            
+
             # Get LLM instance
             logger.info("Getting LLM instance...")
             try:
@@ -85,7 +85,7 @@ class TorchtuneService:
                 logger.error(f"Failed to get LLM instance: {str(e)}")
                 logger.error(f"Traceback: {traceback.format_exc()}")
                 raise
-                
+
             pids_path = f"{self.output_dir}/pids.txt"
             # reset the pids file
             with open(pids_path, "w") as f:
@@ -95,7 +95,7 @@ class TorchtuneService:
             Path(weights_path).unlink(missing_ok=True)
             async_weight_syncing = self.torchtune_args.get("async_weight_syncing", False)
             logger.info(f"Async weight syncing: {async_weight_syncing}")
-            
+
             # start putting the workers to sleep
             logger.info("Creating sleep task for workers...")
             try:
@@ -115,14 +115,14 @@ class TorchtuneService:
                 logger.error(f"Failed to create sleep task: {str(e)}")
                 logger.error(f"Traceback: {traceback.format_exc()}")
                 raise
-                
+
             # wait for the workers to write their pids twice, indicating that they are asleep
             logger.info("Waiting for workers to sleep...")
             timeout_counter = 0
-            max_timeout = 120  # Increase timeout to 120 seconds
+            max_timeout = 300  # Increase timeout to 120 seconds
             expected_worker_count = torch.cuda.device_count() if hasattr(torch, 'cuda') else 2
             logger.info(f"Expecting {expected_worker_count} workers to report sleep status")
-            
+
             while True:
                 try:
                     # Check if the sleep task has failed
@@ -131,7 +131,7 @@ class TorchtuneService:
                         if exc:
                             logger.error(f"Sleep task failed with exception: {exc}")
                             raise exc
-                    
+
                     if not os.path.exists(pids_path):
                         logger.warning(f"PIDs file doesn't exist yet: {pids_path}")
                         await asyncio.sleep(0.25)
@@ -139,31 +139,22 @@ class TorchtuneService:
                         if timeout_counter > max_timeout:
                             raise TimeoutError(f"Timeout waiting for PIDs file after {max_timeout}s")
                         continue
-                        
+
                     with open(pids_path, 'r') as f:
                         pid_lines = f.read().splitlines()
                     pids = Counter(pid_lines)
-                    logger.debug(f"Current PIDs: {dict(pids)}, expecting each to reach 2")
-                    
+
                     # Check if all expected workers have written their PIDs twice
-                    if len(pids) == expected_worker_count and all(count == 2 for count in pids.values()):
+                    if all(count == 2 for count in pids.values()):
                         logger.info(f"All {expected_worker_count} workers reported as asleep")
                         break
-                    
-                    # Also accept if we have the right number of PIDs even if counts aren't exactly 2
-                    # This handles edge cases where PIDs might be written differently
-                    if len(pids) >= expected_worker_count and min(pids.values()) >= 1:
-                        total_writes = sum(pids.values())
-                        if total_writes >= expected_worker_count * 2:
-                            logger.info(f"Workers have written sufficient PIDs (total: {total_writes})")
-                            break
-                        
+
                     await asyncio.sleep(0.25)
                     timeout_counter += 0.25
                     if timeout_counter > max_timeout:
                         logger.error(f"Current PID status after timeout: {dict(pids)}")
                         raise TimeoutError(f"Timeout waiting for workers to sleep after {max_timeout}s")
-                        
+
                 except asyncio.CancelledError:
                     logger.error("PID waiting was cancelled")
                     raise
@@ -173,7 +164,7 @@ class TorchtuneService:
                     raise
             self._is_sleeping = True
             logger.info("Workers are asleep")
-            
+
             # acquire the train process and queue
             logger.info("Getting train process...")
             train_process = await self.train_process
@@ -191,7 +182,7 @@ class TorchtuneService:
                     ).model_dump_json()
                     + "\n"
                 )
-            
+
             # consume the batch gradient step results
             logger.info("Starting to consume training results...")
             num_gradient_steps = -1
@@ -222,19 +213,19 @@ class TorchtuneService:
                             f"Train process exited early. See {self.output_dir}/logs/train.log for details."
                         )
                 num_gradient_steps -= 1
-                
+
             # wait for the workers to wake up
             logger.info("Waiting for workers to wake up...")
             await sleep_task
             self._is_sleeping = False
-            
+
             # update the weights after wake up if async_weight_syncing is enabled
             if async_weight_syncing:
                 asyncio.create_task(self.update_worker_weights(llm, weights_path, verbose))
             else:
                 # remove the weights file
                 Path(weights_path).unlink(missing_ok=True)
-        
+
         except asyncio.CancelledError:
             logger.error("Training was cancelled")
             logger.error(f"Yielded any results: {yielded_any}")
@@ -251,7 +242,7 @@ class TorchtuneService:
             raise
 
     async def update_worker_weights(
-        self, llm: AsyncLLM, weights_path: str, profile: bool
+            self, llm: AsyncLLM, weights_path: str, profile: bool
     ) -> None:
         while True:
             if os.path.exists(weights_path):
@@ -284,7 +275,7 @@ class TorchtuneService:
             try:
                 engine_args = self.config.get("engine_args", {})
                 logger.info(f"Engine args: {engine_args}")
-                
+
                 # Create the get_llm task
                 self._llm_task = asyncio.create_task(
                     get_llm(AsyncEngineArgs(**engine_args))  # type: ignore
@@ -306,7 +297,7 @@ class TorchtuneService:
 
     async def get_train_process(self) -> asyncio.subprocess.Process:
         logger.info("=== Starting get_train_process ===")
-        
+
         try:
             # Migrate existing checkpoints to new structure if needed
             from ..local.checkpoints import migrate_checkpoints_to_new_structure
@@ -315,28 +306,28 @@ class TorchtuneService:
             batch_file = f"{self.output_dir}/batches.jsonl"
             Path(batch_file).unlink(missing_ok=True)
             logger.info(f"Cleared batch file: {batch_file}")
-            
+
             # Get checkpoint directory
             logger.info("Getting checkpoint directory...")
             checkpoint_dir = await self.get_checkpoint_dir()
             logger.info(f"Checkpoint directory: {checkpoint_dir}")
-            
+
             # Check if checkpoint directory exists
             if not os.path.exists(checkpoint_dir):
                 logger.error(f"Checkpoint directory does not exist: {checkpoint_dir}")
                 raise FileNotFoundError(f"Checkpoint directory not found: {checkpoint_dir}")
-            
+
             torchtune_args = self.torchtune_args
             logger.info(f"Torchtune args: {torchtune_args}")
 
             # Get the list of safetensor files
             safetensor_files = glob.glob(f"{checkpoint_dir}/*.safetensors")
             logger.info(f"Found {len(safetensor_files)} safetensor files: {safetensor_files}")
-            
+
             if not safetensor_files:
                 logger.error(f"No .safetensors files found in {checkpoint_dir}")
                 raise FileNotFoundError(f"No checkpoint files found in {checkpoint_dir}")
-                
+
             checkpoint_files = [os.path.basename(f) for f in safetensor_files]
             checkpoint_files_str = "[" + ", ".join(f'"{f}"' for f in checkpoint_files) + "]"
             logger.info(f"Checkpoint files string: {checkpoint_files_str}")
@@ -358,26 +349,26 @@ class TorchtuneService:
             tune_cli_path = f"{torchtune_path}/_cli/tune.py"
             logger.info(f"Torchtune path: {torchtune_path}")
             logger.info(f"Tune CLI path: {tune_cli_path}")
-            
+
             if not os.path.exists(tune_cli_path):
                 logger.error(f"Torchtune CLI not found at: {tune_cli_path}")
                 raise FileNotFoundError(f"Torchtune CLI not found: {tune_cli_path}")
-            
+
             # Check config file
             config_path = f"{os.path.dirname(__file__)}/config.yaml"
             if not os.path.exists(config_path):
                 logger.error(f"Config file not found at: {config_path}")
                 raise FileNotFoundError(f"Config file not found: {config_path}")
-            
+
             # Ensure logs directory exists
             logs_dir = f"{self.output_dir}/logs"
             os.makedirs(logs_dir, exist_ok=True)
             logger.info(f"Created logs directory: {logs_dir}")
-            
+
             # Build the command
             model_component = f"torchtune.models.{model_dir(torchtune_args['model'])}.{torchtune_args['model']}"
             logger.info(f"Model component: {model_component}")
-            
+
             program_and_args = [
                 sys.executable,  # Use current Python interpreter
                 tune_cli_path,
@@ -399,10 +390,10 @@ class TorchtuneService:
                 "metric_logger.log_dir=null",
                 f"enable_activation_offloading={torchtune_args.get('enable_activation_offloading', False)}",
             ]
-            
+
             logger.info("Full command to execute:")
             logger.info(" ".join(program_and_args))
-            
+
             # Create the subprocess
             logger.info("Creating subprocess...")
             process = await asyncio.subprocess.create_subprocess_exec(
@@ -411,10 +402,10 @@ class TorchtuneService:
                 stderr=asyncio.subprocess.PIPE,
                 env={**os.environ, "PYTHONUNBUFFERED": "1"},  # Ensure unbuffered output
             )
-            
+
             logger.info(f"Subprocess created with PID: {process.pid}")
             return process
-            
+
         except Exception as e:
             logger.error(f"Failed to create train process: {str(e)}")
             logger.error(f"Traceback: {traceback.format_exc()}")
@@ -422,11 +413,11 @@ class TorchtuneService:
 
     async def get_train_queue(self) -> asyncio.Queue[dict[str, float]]:
         logger.info("Getting train queue...")
-        
+
         try:
             process = await self.train_process
             queue = asyncio.Queue()
-            
+
             # Create logs directory if it doesn't exist
             logs_dir = f"{self.output_dir}/logs"
             os.makedirs(logs_dir, exist_ok=True)
@@ -439,11 +430,11 @@ class TorchtuneService:
                         line_str = line.decode("utf-8")
                         with open(train_log_path, "a") as f:
                             f.write(f"[{stream_name}] {line_str}")
-                        
+
                         # Also log the first few lines to console for debugging
                         if stream_name == "stderr":
                             logger.error(f"Train process stderr: {line_str.strip()}")
-                        
+
                         line_str = line_str.strip()
                         if line_str.startswith("Step ") and " | " in line_str:
                             parts = line_str.split(" | ", 1)
@@ -465,7 +456,7 @@ class TorchtuneService:
             assert process.stdout and process.stderr
             asyncio.create_task(read(process.stdout, "stdout"))
             asyncio.create_task(read(process.stderr, "stderr"))
-            
+
             # Check if process is still running after a short delay
             await asyncio.sleep(0.5)
             if process.returncode is not None:
@@ -479,9 +470,9 @@ class TorchtuneService:
                     stdout_output = await process.stdout.read()
                     if stdout_output:
                         logger.error(f"Stdout output: {stdout_output.decode('utf-8')}")
-            
+
             return queue
-            
+
         except Exception as e:
             logger.error(f"Failed to get train queue: {str(e)}")
             logger.error(f"Traceback: {traceback.format_exc()}")
@@ -489,20 +480,20 @@ class TorchtuneService:
 
     async def get_checkpoint_dir(self) -> str:
         logger.info("Getting checkpoint directory...")
-        
+
         # Use the last of any existing checkpoints to resume training
         if last_checkpoint_dir := self.get_last_checkpoint_dir():
             logger.info(f"Using existing checkpoint directory: {last_checkpoint_dir}")
             return last_checkpoint_dir
-            
+
         # Check if self.base_model is a directory
         if os.path.isdir(self.base_model):
             logger.info(f"Base model is a directory: {self.base_model}")
             return self.base_model
-            
+
         # Otherwise, assume it's a HuggingFace model id and download it
         logger.info(f"Downloading HuggingFace model: {self.base_model}")
-        
+
         try:
             process = await asyncio.subprocess.create_subprocess_exec(
                 "huggingface-cli",
@@ -512,21 +503,21 @@ class TorchtuneService:
                 stderr=asyncio.subprocess.PIPE,
             )
             stdout, stderr = await process.communicate()
-            
+
             if process.returncode != 0:
                 logger.error(f"Failed to download model. Return code: {process.returncode}")
                 logger.error(f"Stderr: {stderr.decode('utf-8')}")
                 raise RuntimeError(f"Failed to download model {self.base_model}")
-                
+
             output_lines = stdout.decode("utf-8").splitlines()
             if not output_lines:
                 logger.error("No output from huggingface-cli download")
                 raise RuntimeError("huggingface-cli download produced no output")
-                
+
             checkpoint_dir = output_lines[-1].strip()
             logger.info(f"Downloaded model to: {checkpoint_dir}")
             return checkpoint_dir
-            
+
         except Exception as e:
             logger.error(f"Failed to get checkpoint directory: {str(e)}")
             logger.error(f"Traceback: {traceback.format_exc()}")
@@ -539,7 +530,7 @@ class TorchtuneService:
 
 
 def sleep(
-    *, level: int, pids_path: str, weights_path: str | None, profile: bool
+        *, level: int, pids_path: str, weights_path: str | None, profile: bool
 ) -> None:
     """
     Put the worker to sleep until the new model weights are loaded.

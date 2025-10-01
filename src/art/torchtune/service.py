@@ -43,6 +43,7 @@ class TorchtuneService:
     output_dir: str
     _is_sleeping: bool = False
     _llm_task: asyncio.Task[AsyncLLM] | None = field(default=None, init=False)
+    _train_count: int = field(default=0, init=False)
 
     async def start_openai_server(self, config: dev.OpenAIServerConfig | None) -> None:
         await openai_server_task(
@@ -65,7 +66,8 @@ class TorchtuneService:
             _config: dev.TrainConfig,
             verbose: bool = False,
     ) -> AsyncIterator[dict[str, float]]:
-        logger.info(f"Starting training with output_dir: {self.output_dir}")
+        self._train_count += 1
+        logger.info(f"Starting training #{self._train_count} with output_dir: {self.output_dir}")
         logger.info(f"Torchtune args: {self.torchtune_args}")
 
         # Track if we've started yielding results
@@ -218,6 +220,7 @@ class TorchtuneService:
             logger.info("Waiting for workers to wake up...")
             await sleep_task
             self._is_sleeping = False
+            logger.info(f"Workers awake, training #{self._train_count} complete")
 
             # update the weights after wake up if async_weight_syncing is enabled
             if async_weight_syncing:

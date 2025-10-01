@@ -92,10 +92,10 @@ class LocalBackend(Backend):
         return self
 
     def __exit__(
-        self,
-        exc_type: type[BaseException] | None,
-        exc: BaseException | None,
-        tb: TracebackType | None,
+            self,
+            exc_type: type[BaseException] | None,
+            exc: BaseException | None,
+            tb: TracebackType | None,
     ) -> None:
         self._close()
 
@@ -110,8 +110,8 @@ class LocalBackend(Backend):
             close_proxy(service)
 
     async def register(
-        self,
-        model: Model,
+            self,
+            model: Model,
     ) -> None:
         """
         Registers a model with the local Backend for logging and/or training.
@@ -156,8 +156,8 @@ class LocalBackend(Backend):
                 # Kill all "model-service" processes to free up GPU memory
                 subprocess.run(["pkill", "-9", "model-service"])
                 if isinstance(
-                    self._services[model.name],
-                    (UnslothService, DecoupledUnslothService),
+                        self._services[model.name],
+                        (UnslothService, DecoupledUnslothService),
                 ):
                     # To enable sleep mode, import peft before unsloth
                     # Unsloth will issue warnings, but everything appears to be okay
@@ -173,13 +173,13 @@ class LocalBackend(Backend):
         return self._services[model.name]
 
     def _get_packed_tensors(
-        self,
-        model: TrainableModel,
-        trajectory_groups: list[TrajectoryGroup],
-        advantage_balance: float,
-        allow_training_without_logprobs: bool,
-        scale_rewards: bool,
-        plot_tensors: bool,
+            self,
+            model: TrainableModel,
+            trajectory_groups: list[TrajectoryGroup],
+            advantage_balance: float,
+            allow_training_without_logprobs: bool,
+            scale_rewards: bool,
+            plot_tensors: bool,
     ) -> PackedTensors | None:
         if model.base_model not in self._tokenizers:
             self._tokenizers[model.base_model] = AutoTokenizer.from_pretrained(
@@ -213,8 +213,8 @@ class LocalBackend(Backend):
             advantage_balance=advantage_balance,
         )
         if (
-            not allow_training_without_logprobs
-            and np.isnan(packed_tensors["logprobs"]).all()
+                not allow_training_without_logprobs
+                and np.isnan(packed_tensors["logprobs"]).all()
         ):
             print(
                 "There are no assistant logprobs to train on. Did you forget to include at least one Choice in Trajectory.messages_and_choices?"
@@ -241,10 +241,10 @@ class LocalBackend(Backend):
         return 0
 
     async def _delete_checkpoints(
-        self,
-        model: TrainableModel,
-        benchmark: str,
-        benchmark_smoothing: float,
+            self,
+            model: TrainableModel,
+            benchmark: str,
+            benchmark_smoothing: float,
     ) -> None:
         output_dir = get_model_dir(model=model, art_path=self._path)
         # Keep the latest step
@@ -268,81 +268,25 @@ class LocalBackend(Backend):
         delete_checkpoints(output_dir, steps_to_keep)
 
     async def _prepare_backend_for_training(
-        self,
-        model: TrainableModel,
-        config: dev.OpenAIServerConfig | None = None,
+            self,
+            model: TrainableModel,
+            config: dev.OpenAIServerConfig | None = None,
     ) -> tuple[str, str]:
-        logger = logging.getLogger(__name__)
         service = await self._get_service(model)
-        
-        # Just start the server normally for all services
         await service.start_openai_server(config=config)
-            
         server_args = (config or {}).get("server_args", {})
 
         base_url = f"http://{server_args.get('host', '0.0.0.0')}:{server_args.get('port', 8000)}/v1"
         api_key = server_args.get("api_key", None) or "default"
 
-        def done_callback(_: asyncio.Task[None]) -> None:
-            close_proxy(self._services.pop(model.name))
-
-        asyncio.create_task(
-            self._monitor_openai_server(model.name, base_url, api_key)
-        ).add_done_callback(done_callback)
-
         return base_url, api_key
 
-    async def _monitor_openai_server(
-        self, model_name: str, base_url: str, api_key: str
-    ) -> None:
-        openai_client = AsyncOpenAI(
-            base_url=base_url,
-            api_key=api_key,
-        )
-        async with aiohttp.ClientSession() as session:
-            while True:
-                # Wait 30 seconds before checking again
-                await asyncio.sleep(30)
-                # If the server is sleeping, skip the check
-                if await self._services[model_name].vllm_engine_is_sleeping():
-                    continue
-                # Check the metrics
-                async with session.get(
-                    f"{base_url.split('/v1')[0]}/metrics"
-                ) as response:
-                    metrics = await response.text()
-                # Parse Prometheus metrics for running requests
-                running_requests = 0
-                pending_requests = 0
-                for line in metrics.split("\n"):
-                    if line.startswith("vllm:num_requests_running"):
-                        running_requests = int(float(line.split()[1]))
-                    elif line.startswith("vllm:num_requests_waiting"):
-                        pending_requests = int(float(line.split()[1]))
-                # If there are no running or pending requests, send a health check
-                if running_requests == 0 and pending_requests == 0:
-                    try:
-                        # Send a health check with a 5 second timeout
-                        timeout = float(
-                            os.environ.get("ART_SERVER_MONITOR_TIMEOUT", 5.0)
-                        )
-                        # Send a health check with a 5 second timeout
-                        await openai_client.models.retrieve(
-                            model=model_name,
-                            timeout=timeout,
-                        )
-                        # get the completion response, exit the loop
-                    except Exception as e:
-                        # If the server is sleeping, a failed health check is okay
-                        if await self._services[model_name].vllm_engine_is_sleeping():
-                            continue
-                        raise e
 
     async def _log(
-        self,
-        model: Model,
-        trajectory_groups: list[TrajectoryGroup],
-        split: str = "val",
+            self,
+            model: Model,
+            trajectory_groups: list[TrajectoryGroup],
+            split: str = "val",
     ) -> None:
         # Save logs for trajectory groups
         parent_dir = get_trajectories_split_dir(
@@ -401,12 +345,12 @@ class LocalBackend(Backend):
         return header + "\n".join(formatted_messages)
 
     async def _train_model(
-        self,
-        model: TrainableModel,
-        trajectory_groups: list[TrajectoryGroup],
-        config: TrainConfig,
-        dev_config: dev.TrainConfig,
-        verbose: bool = False,
+            self,
+            model: TrainableModel,
+            trajectory_groups: list[TrajectoryGroup],
+            config: TrainConfig,
+            dev_config: dev.TrainConfig,
+            verbose: bool = False,
     ) -> AsyncIterator[dict[str, float]]:
         if verbose:
             print("Starting _train_model")
@@ -482,13 +426,13 @@ class LocalBackend(Backend):
             config = config.model_copy(
                 update={
                     "learning_rate": config.learning_rate
-                    * self._get_reward_std_dev_learning_rate_multiplier(model)
+                                     * self._get_reward_std_dev_learning_rate_multiplier(model)
                 }
             )
         results: list[dict[str, float]] = []
         estimated_gradient_steps = disk_packed_tensors["num_sequences"]
         if torchtune_args := (model._internal_config or dev.InternalModelConfig()).get(
-            "torchtune_args"
+                "torchtune_args"
         ):
             tp = torchtune_args.get("tensor_parallel_dim", 1)
             cp = torchtune_args.get("context_parallel_dim", 1)
@@ -498,13 +442,13 @@ class LocalBackend(Backend):
         pbar = tqdm.tqdm(total=estimated_gradient_steps, desc="train")
         try:
             async for result in service.train(
-                disk_packed_tensors, config, dev_config, verbose
+                    disk_packed_tensors, config, dev_config, verbose
             ):
                 # Handle initial status message
                 if result.get("status") == "initializing":
                     logger.info("Received initialization status from service")
                     continue
-                    
+
                 num_gradient_steps = int(
                     result.pop("num_gradient_steps", estimated_gradient_steps)
                 )
@@ -541,7 +485,7 @@ class LocalBackend(Backend):
             print("_train_model complete")
 
     def _get_reward_std_dev_learning_rate_multiplier(
-        self, model: TrainableModel
+            self, model: TrainableModel
     ) -> float:
         output_dir = get_model_dir(model=model, art_path=self._path)
         learning_rate_multiplier = 1.0  # Default prior
@@ -579,7 +523,7 @@ class LocalBackend(Backend):
                 n_samples = len(steps)
                 if n_samples > 2:
                     adjusted_r_squared = 1 - (1 - r_squared) * (n_samples - 1) / (
-                        n_samples - 2
+                            n_samples - 2
                     )
                 else:
                     adjusted_r_squared = (
@@ -629,17 +573,17 @@ class LocalBackend(Backend):
         return learning_rate_multiplier
 
     def _log_metrics(
-        self,
-        model: Model,
-        metrics: dict[str, float],
-        split: str,
-        step: int | None = None,
+            self,
+            model: Model,
+            metrics: dict[str, float],
+            split: str,
+            step: int | None = None,
     ) -> None:
         metrics = {f"{split}/{metric}": value for metric, value in metrics.items()}
         step = step if step is not None else self.__get_step(model)
 
         with open(
-            f"{get_model_dir(model=model, art_path=self._path)}/history.jsonl", "a"
+                f"{get_model_dir(model=model, art_path=self._path)}/history.jsonl", "a"
         ) as f:
             f.write(
                 json.dumps(
@@ -664,8 +608,8 @@ class LocalBackend(Backend):
         if "WANDB_API_KEY" not in os.environ:
             return None
         if (
-            model.name not in self._wandb_runs
-            or self._wandb_runs[model.name]._is_finished
+                model.name not in self._wandb_runs
+                or self._wandb_runs[model.name]._is_finished
         ):
             run = wandb.init(
                 project=model.project,
@@ -695,18 +639,18 @@ class LocalBackend(Backend):
     # ------------------------------------------------------------------
 
     async def _experimental_pull_from_s3(
-        self,
-        model: Model,
-        *,
-        s3_bucket: str | None = None,
-        prefix: str | None = None,
-        verbose: bool = False,
-        delete: bool = False,
-        only_step: int | Literal["latest"] | None = None,
-        # LocalBackend extensions (not part of the base interface)
-        step: int | None = None,
-        exclude: list[ExcludableOption] | None = None,
-        latest_only: bool = False,
+            self,
+            model: Model,
+            *,
+            s3_bucket: str | None = None,
+            prefix: str | None = None,
+            verbose: bool = False,
+            delete: bool = False,
+            only_step: int | Literal["latest"] | None = None,
+            # LocalBackend extensions (not part of the base interface)
+            step: int | None = None,
+            exclude: list[ExcludableOption] | None = None,
+            latest_only: bool = False,
     ) -> None:
         """Download the model directory from S3 into local Backend storage. Right now this can be used to pull trajectory logs for processing or model checkpoints.
         Args:
@@ -767,13 +711,13 @@ class LocalBackend(Backend):
         )
 
     async def _experimental_push_to_s3(
-        self,
-        model: Model,
-        *,
-        s3_bucket: str | None = None,
-        prefix: str | None = None,
-        verbose: bool = False,
-        delete: bool = False,
+            self,
+            model: Model,
+            *,
+            s3_bucket: str | None = None,
+            prefix: str | None = None,
+            verbose: bool = False,
+            delete: bool = False,
     ) -> None:
         """Upload the model directory from local storage to S3."""
         await push_model_to_s3(
@@ -787,14 +731,14 @@ class LocalBackend(Backend):
         )
 
     async def _experimental_fork_checkpoint(
-        self,
-        model: Model,
-        from_model: str,
-        from_project: str | None = None,
-        from_s3_bucket: str | None = None,
-        not_after_step: int | None = None,
-        verbose: bool = False,
-        prefix: str | None = None,
+            self,
+            model: Model,
+            from_model: str,
+            from_project: str | None = None,
+            from_s3_bucket: str | None = None,
+            not_after_step: int | None = None,
+            verbose: bool = False,
+            prefix: str | None = None,
     ) -> None:
         """Fork a checkpoint from another model to initialize this model.
 
@@ -962,15 +906,15 @@ class LocalBackend(Backend):
             )
 
     async def _experimental_deploy(
-        self,
-        deploy_to: LoRADeploymentProvider,
-        model: "TrainableModel",
-        step: int | None = None,
-        s3_bucket: str | None = None,
-        prefix: str | None = None,
-        verbose: bool = False,
-        pull_s3: bool = True,
-        wait_for_completion: bool = True,
+            self,
+            deploy_to: LoRADeploymentProvider,
+            model: "TrainableModel",
+            step: int | None = None,
+            s3_bucket: str | None = None,
+            prefix: str | None = None,
+            verbose: bool = False,
+            pull_s3: bool = True,
+            wait_for_completion: bool = True,
     ) -> LoRADeploymentJob:
         """
         Deploy the model's latest checkpoint to a hosted inference endpoint.

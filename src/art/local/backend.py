@@ -324,7 +324,6 @@ class LocalBackend(Backend):
                             timeout=timeout,
                         )
                         # get the completion response, exit the loop
-                        break
                     except Exception as e:
                         # If the server is sleeping, a failed health check is okay
                         if await self._services[model_name].vllm_engine_is_sleeping():

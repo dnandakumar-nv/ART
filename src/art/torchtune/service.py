@@ -4,7 +4,7 @@ import logging
 import os
 import time
 from collections import Counter
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from functools import cached_property
 from pathlib import Path
 from typing import AsyncIterator
@@ -28,6 +28,7 @@ class TorchtuneService:
     config: dev.InternalModelConfig
     output_dir: str
     _is_sleeping: bool = False
+    _llm_task: asyncio.Task[AsyncLLM] | None = field(default=None, init=False)
 
     async def start_openai_server(self, config: dev.OpenAIServerConfig | None) -> None:
         await openai_server_task(
@@ -149,11 +150,13 @@ class TorchtuneService:
         )
         return torchtune_args
 
-    @cached_property
+    @property
     def llm(self) -> asyncio.Task[AsyncLLM]:
-        return asyncio.create_task(
-            get_llm(AsyncEngineArgs(**self.config.get("engine_args", {})))  # type: ignore
-        )
+        if self._llm_task is None:
+            self._llm_task = asyncio.create_task(
+                get_llm(AsyncEngineArgs(**self.config.get("engine_args", {})))  # type: ignore
+            )
+        return self._llm_task
 
     @cached_property
     def train_queue(self) -> asyncio.Task[asyncio.Queue[dict[str, float]]]:

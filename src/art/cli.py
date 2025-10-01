@@ -85,12 +85,21 @@ def run(host: str = "0.0.0.0", port: int = 7999) -> None:
         verbose: bool = Body(False),
     ) -> StreamingResponse:
         async def stream() -> AsyncIterator[str]:
-            async for result in backend._train_model(
-                model, trajectory_groups, config, dev_config, verbose
-            ):
-                yield json.dumps(result) + "\n"
+            try:
+                async for result in backend._train_model(
+                    model, trajectory_groups, config, dev_config, verbose
+                ):
+                    yield json.dumps(result) + "\n"
+            except Exception as e:
+                # Log the error but ensure we complete the response properly
+                import logging
+                logger = logging.getLogger(__name__)
+                logger.error(f"Error during training stream: {str(e)}")
+                # Send error information to client
+                yield json.dumps({"error": str(e), "type": type(e).__name__}) + "\n"
+                raise
 
-        return StreamingResponse(stream())
+        return StreamingResponse(stream(), media_type="application/x-ndjson")
 
     # Wrap in function with Body(...) to ensure FastAPI correctly interprets
     # all parameters as body parameters

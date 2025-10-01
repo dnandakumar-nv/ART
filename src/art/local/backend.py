@@ -1,5 +1,6 @@
 import asyncio
 import json
+import logging
 import math
 import os
 import subprocess
@@ -20,6 +21,9 @@ from transformers.tokenization_utils_base import PreTrainedTokenizerBase
 from typing_extensions import Self
 from wandb.sdk.wandb_run import Run
 from weave.trace.weave_client import WeaveClient
+
+# Configure logging
+logging.basicConfig(level=logging.INFO)
 
 from art.utils.deploy_model import (
     LoRADeploymentJob,
@@ -402,7 +406,12 @@ class LocalBackend(Backend):
     ) -> AsyncIterator[dict[str, float]]:
         if verbose:
             print("Starting _train_model")
+        import logging
+        logger = logging.getLogger(__name__)
+        logger.info(f"Getting service for model: {model.name}")
+        logger.info(f"In-process mode: {self._in_process}")
         service = await self._get_service(model)
+        logger.info(f"Got service: {type(service).__name__}")
         if verbose:
             print("Logging training data to disk...")
         await self._log(model, trajectory_groups, "train")
@@ -483,19 +492,34 @@ class LocalBackend(Backend):
             dp = world_size // (tp * cp)
             estimated_gradient_steps = math.ceil(estimated_gradient_steps / dp)
         pbar = tqdm.tqdm(total=estimated_gradient_steps, desc="train")
-        async for result in service.train(
-            disk_packed_tensors, config, dev_config, verbose
-        ):
-            num_gradient_steps = int(
-                result.pop("num_gradient_steps", estimated_gradient_steps)
-            )
-            assert num_gradient_steps == estimated_gradient_steps, (
-                f"num_gradient_steps {num_gradient_steps} != estimated_gradient_steps {estimated_gradient_steps}"
-            )
-            results.append(result)
-            yield {**result, "num_gradient_steps": num_gradient_steps}
-            pbar.update(1)
-            pbar.set_postfix(result)
+        try:
+            async for result in service.train(
+                disk_packed_tensors, config, dev_config, verbose
+            ):
+                # Handle initial status message
+                if result.get("status") == "initializing":
+                    logger.info("Received initialization status from service")
+                    continue
+                    
+                num_gradient_steps = int(
+                    result.pop("num_gradient_steps", estimated_gradient_steps)
+                )
+                assert num_gradient_steps == estimated_gradient_steps, (
+                    f"num_gradient_steps {num_gradient_steps} != estimated_gradient_steps {estimated_gradient_steps}"
+                )
+                results.append(result)
+                yield {**result, "num_gradient_steps": num_gradient_steps}
+                pbar.update(1)
+                pbar.set_postfix(result)
+        except Exception as e:
+            import logging
+            import traceback
+            logger = logging.getLogger(__name__)
+            logger.error(f"Error during training: {str(e)}")
+            logger.error(f"Error type: {type(e).__name__}")
+            logger.error(f"Traceback:\n{traceback.format_exc()}")
+            pbar.close()
+            raise
         pbar.close()
         if verbose:
             print("Logging metrics...")
